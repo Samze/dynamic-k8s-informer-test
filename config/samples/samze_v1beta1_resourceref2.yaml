@@ -1,0 +1,9 @@
+apiVersion: samze.samze.com/v1beta1
+kind: ResourceRef
+metadata:
+  name: resourceref-sample2
+spec:
+  group: rabbitmq.com
+  version: v1beta1
+  resource: rabbitmqclusters
+  name: hello-world-2

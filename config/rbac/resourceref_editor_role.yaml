@@ -1,0 +1,24 @@
+# permissions for end users to edit resourcerefs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: resourceref-editor-role
+rules:
+- apiGroups:
+  - samze.samze.com
+  resources:
+  - resourcerefs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - samze.samze.com
+  resources:
+  - resourcerefs/status
+  verbs:
+  - get
