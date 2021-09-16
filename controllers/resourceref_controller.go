@@ -97,6 +97,15 @@ func (r *ResourceRefReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, nil
 }
 
+func (r *ResourceRefReconciler) SetupWithManager(mgr ctrl.Manager, events chan event.GenericEvent) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&samzev1beta1.ResourceRef{}).
+		Watches(&source.Channel{Source: events}, &handler.EnqueueRequestForObject{}).
+		Complete(r)
+}
+
+// TrackerInformerManager allows Tracking and Untracking of gvrs.
+// Events are emitted on changes to the dynamic type with a refernece to the Parent to the provided Channel.
 type TrackerInformerManager struct {
 	trackedInformers       map[schema.GroupVersionResource]*TrackedInformer
 	dynamicInformerFactory dynamicinformer.DynamicSharedInformerFactory
@@ -205,15 +214,6 @@ func (t *TrackerInformerManager) startInformer(gvr schema.GroupVersionResource, 
 	cache.WaitForCacheSync(stopChan, typeInformer.Informer().HasSynced)
 
 	return nil
-}
-
-// SetupWithManager sets up the controller with the Manager.
-func (r *ResourceRefReconciler) SetupWithManager(mgr ctrl.Manager, events chan event.GenericEvent) error {
-
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&samzev1beta1.ResourceRef{}).
-		Watches(&source.Channel{Source: events}, &handler.EnqueueRequestForObject{}).
-		Complete(r)
 }
 
 func containsString(slice []string, s string) bool {
