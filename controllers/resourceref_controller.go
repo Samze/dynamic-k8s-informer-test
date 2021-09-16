@@ -94,6 +94,19 @@ func (r *ResourceRefReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	//Logic here.
 
+	//Interacting with dynamic resources.
+	lister, err := r.Tracker.GetLister(gvr)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	//Put this into a client?
+	obj, err := lister.ByNamespace(resourceRef.GetNamespace()).Get(resourceRef.Spec.Name)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	l.Info("referred obj", " obj", obj)
+
 	return ctrl.Result{}, nil
 }
 
@@ -117,6 +130,7 @@ type TrackedInformer struct {
 	claimResources map[types.NamespacedName]client.Object
 	gvr            schema.GroupVersionResource
 	stopChan       chan struct{}
+	lister         cache.GenericLister
 }
 
 func NewTrackerInformerManager(client dynamic.Interface, eventChan chan event.GenericEvent) *TrackerInformerManager {
@@ -142,9 +156,12 @@ func (t *TrackerInformerManager) Track(parent *v1beta1.ResourceRef, gvr schema.G
 		}
 
 		t.trackedInformers[gvr] = tracker
-		if err := t.startInformer(gvr, stopChan); err != nil {
+		lister, err := t.startInformer(gvr, stopChan)
+		if err != nil {
 			return err
 		}
+
+		tracker.lister = lister
 	}
 	namespacedName := types.NamespacedName{Name: parent.Spec.Name, Namespace: parent.Namespace}
 	tracker.claimResources[namespacedName] = parent
@@ -174,7 +191,16 @@ func (t *TrackerInformerManager) Untrack(parent *v1beta1.ResourceRef, gvr schema
 	return true
 }
 
-func (t *TrackerInformerManager) startInformer(gvr schema.GroupVersionResource, stopChan chan struct{}) error {
+func (t *TrackerInformerManager) GetLister(gvr schema.GroupVersionResource) (cache.GenericLister, error) {
+	trackedInformer, found := t.trackedInformers[gvr]
+	if !found {
+		return nil, fmt.Errorf("lister not found")
+	}
+	return trackedInformer.lister, nil
+
+}
+
+func (t *TrackerInformerManager) startInformer(gvr schema.GroupVersionResource, stopChan chan struct{}) (cache.GenericLister, error) {
 	fmt.Println("starting informer")
 	typeInformer := t.dynamicInformerFactory.ForResource(gvr)
 
@@ -213,7 +239,7 @@ func (t *TrackerInformerManager) startInformer(gvr schema.GroupVersionResource, 
 	go typeInformer.Informer().Run(stopChan)
 	cache.WaitForCacheSync(stopChan, typeInformer.Informer().HasSynced)
 
-	return nil
+	return typeInformer.Lister(), nil
 }
 
 func containsString(slice []string, s string) bool {
