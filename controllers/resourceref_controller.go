@@ -33,7 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/samze/dynamic-test/api/v1beta1"
 	samzev1beta1 "github.com/samze/dynamic-test/api/v1beta1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
@@ -61,7 +60,7 @@ func (r *ResourceRefReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	l.Info("reconciled", "key", req)
 	// your logic here
-	resourceRef := v1beta1.ResourceRef{}
+	resourceRef := samzev1beta1.ResourceRef{}
 	if err := r.Get(context.Background(), req.NamespacedName, &resourceRef); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -127,10 +126,10 @@ type TrackerInformerManager struct {
 }
 
 type TrackedInformer struct {
-	claimResources map[types.NamespacedName]client.Object
-	gvr            schema.GroupVersionResource
-	stopChan       chan struct{}
-	lister         cache.GenericLister
+	parentResources map[types.NamespacedName]client.Object
+	gvr             schema.GroupVersionResource
+	stopChan        chan struct{}
+	lister          cache.GenericLister
 }
 
 func NewTrackerInformerManager(client dynamic.Interface, eventChan chan event.GenericEvent) *TrackerInformerManager {
@@ -141,7 +140,7 @@ func NewTrackerInformerManager(client dynamic.Interface, eventChan chan event.Ge
 	}
 }
 
-func (t *TrackerInformerManager) Track(parent *v1beta1.ResourceRef, gvr schema.GroupVersionResource) error {
+func (t *TrackerInformerManager) Track(parent *samzev1beta1.ResourceRef, gvr schema.GroupVersionResource) error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
@@ -150,9 +149,9 @@ func (t *TrackerInformerManager) Track(parent *v1beta1.ResourceRef, gvr schema.G
 	if !found {
 		stopChan := make(chan struct{})
 		tracker = &TrackedInformer{
-			gvr:            gvr,
-			stopChan:       stopChan,
-			claimResources: make(map[types.NamespacedName]client.Object),
+			gvr:             gvr,
+			stopChan:        stopChan,
+			parentResources: make(map[types.NamespacedName]client.Object),
 		}
 
 		t.trackedInformers[gvr] = tracker
@@ -164,12 +163,12 @@ func (t *TrackerInformerManager) Track(parent *v1beta1.ResourceRef, gvr schema.G
 		tracker.lister = lister
 	}
 	namespacedName := types.NamespacedName{Name: parent.Spec.Name, Namespace: parent.Namespace}
-	tracker.claimResources[namespacedName] = parent
+	tracker.parentResources[namespacedName] = parent
 
 	return nil
 }
 
-func (t *TrackerInformerManager) Untrack(parent *v1beta1.ResourceRef, gvr schema.GroupVersionResource) bool {
+func (t *TrackerInformerManager) Untrack(parent *samzev1beta1.ResourceRef, gvr schema.GroupVersionResource) bool {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
@@ -179,10 +178,10 @@ func (t *TrackerInformerManager) Untrack(parent *v1beta1.ResourceRef, gvr schema
 		return false
 	}
 	namenamed := types.NamespacedName{Name: parent.Spec.Name, Namespace: parent.Namespace}
-	delete(trackedMap.claimResources, namenamed)
+	delete(trackedMap.parentResources, namenamed)
 
-	// When there are no longer any Resource Claims, clean up watch
-	if len(trackedMap.claimResources) == 0 {
+	// When there are no longer any parent resources, clean up watch
+	if len(trackedMap.parentResources) == 0 {
 		fmt.Println("stopping informer")
 		informer := t.trackedInformers[gvr]
 		informer.stopChan <- struct{}{}
@@ -208,7 +207,7 @@ func (t *TrackerInformerManager) startInformer(gvr schema.GroupVersionResource, 
 		AddFunc: func(obj interface{}) {
 			clientObj := obj.(client.Object)
 			namespacedName := types.NamespacedName{Name: clientObj.GetName(), Namespace: clientObj.GetNamespace()}
-			parent, found := t.trackedInformers[gvr].claimResources[namespacedName]
+			parent, found := t.trackedInformers[gvr].parentResources[namespacedName]
 			if found {
 				t.eventChan <- event.GenericEvent{Object: parent}
 			}
@@ -221,7 +220,7 @@ func (t *TrackerInformerManager) startInformer(gvr schema.GroupVersionResource, 
 				return
 			}
 			namespacedName := types.NamespacedName{Name: newClientObj.GetName(), Namespace: newClientObj.GetNamespace()}
-			parent, found := t.trackedInformers[gvr].claimResources[namespacedName]
+			parent, found := t.trackedInformers[gvr].parentResources[namespacedName]
 			if found {
 				t.eventChan <- event.GenericEvent{Object: parent}
 			}
@@ -229,7 +228,7 @@ func (t *TrackerInformerManager) startInformer(gvr schema.GroupVersionResource, 
 		DeleteFunc: func(obj interface{}) {
 			clientObj := obj.(client.Object)
 			namespacedName := types.NamespacedName{Name: clientObj.GetName(), Namespace: clientObj.GetNamespace()}
-			parent, found := t.trackedInformers[gvr].claimResources[namespacedName]
+			parent, found := t.trackedInformers[gvr].parentResources[namespacedName]
 			if found {
 				t.eventChan <- event.GenericEvent{Object: parent}
 			}
